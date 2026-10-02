@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -45,6 +46,23 @@ def start(cmd, cwd, log_path, env=None):
     log = open(log_path, "w")
     return subprocess.Popen(cmd, cwd=cwd, stdout=log, stderr=subprocess.STDOUT,
                             env=env), log_path
+
+
+def wait_for_port(port, host="127.0.0.1", seconds=30):
+    """True once something is listening and accepting TCP connections.
+
+    A fixed sleep is not enough on a busy runner: if the mocks have not finished
+    starting, the first requests get a 502 from the router (which is honest - the
+    upstream really was unreachable) and the test fails for the wrong reason.
+    """
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.2)
+    return False
 
 
 def wait_for(path, needle, seconds=20):
@@ -120,7 +138,12 @@ def main():
             log = os.path.join(workdir, f"mock-{mock_name}.log")
             mocks.append(start([PYTHON, "test/mock_upstream.py", port, mock_name],
                                ROOT, log))
-        time.sleep(0.5)
+        for port in ("9101", "9102"):
+            if not wait_for_port(int(port)):
+                proc, log = mocks[0 if port == "9101" else 1]
+                raise Fail(f"mock upstream on port {port} never accepted a connection"
+                           + (" (process exited)" if proc.poll() is not None else "")
+                           + ":\n" + open(log).read())
 
         router, _ = start([os.path.abspath("./funcroute"), "test/config.test.json",
                            "--log", db], ROOT, router_log)
@@ -195,6 +218,10 @@ def main():
     except Fail as exc:
         check("harness", False, str(exc))
         print(open(router_log).read() if os.path.exists(router_log) else "")
+        for _, log in mocks:
+            if os.path.exists(log):
+                print(f"--- {os.path.basename(log)} ---")
+                print(open(log).read())
     finally:
         stop(router)
         for proc, _ in mocks:
