@@ -80,7 +80,9 @@ jobs:
 
   publish:
     name: publish release
-    needs: build
+    # Both jobs: without the source job the release would go out with only the
+    # four platform packages, depending on which artifact download won the race.
+    needs: [build, source]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -107,3 +109,29 @@ jobs:
           else
             gh release create "$TAG" --title "$TAG" --generate-notes dist/*
           fi
+
+  source:
+    name: source tarball
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        run: echo "value=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Package source
+        run: |
+          chmod +x scripts/package.sh run.sh
+          VERSION="${{ steps.version.outputs.value }}" scripts/package.sh source
+          ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: funcroute-source
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error

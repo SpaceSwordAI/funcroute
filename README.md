@@ -227,7 +227,12 @@ Builds clean with `-std=c2x -Wall -Wextra -Wpedantic`, no warnings.
 
 ## Releases, packaging and CI
 
-Tagged builds are attached to the releases page, one tarball per platform:
+Tagged builds are attached to the releases page automatically, one tarball per
+platform. Pushing a `v*` tag is the only step: the workflow builds, tests,
+packages, writes checksums and creates the release, so nothing is uploaded by
+hand. Every push to `main` also refreshes a rolling `edge` pre-release with the
+same five packages, which means there is always something downloadable without
+waiting for a tag, and it is clearly marked as the build not to trust.
 
 | Tarball | Built on | Notes |
 | --- | --- | --- |
@@ -235,11 +240,14 @@ Tagged builds are attached to the releases page, one tarball per platform:
 | `funcroute-<version>-linux-aarch64.tar.gz` | ubuntu-24.04-arm | same |
 | `funcroute-<version>-darwin-arm64.tar.gz` | macos-15 | self-contained, the Homebrew dylibs ship in `lib/` |
 | `funcroute-<version>-darwin-x86_64.tar.gz` | macos-15-intel | same |
+| `funcroute-<version>-src.tar.gz` | any | the whole source tree: `src/`, `test/`, `scripts/`, Makefile, docs, workflows |
 
-Each tarball unpacks into a single directory holding `funcroute`,
+Five packages are published per release: four platform builds and one source
+tarball. Each binary package unpacks into a directory holding `funcroute`,
 `funcroute-client`, `run.sh`, `config.json`, `.env.example`, the README and the
-licence, so `./run.sh` works straight out of the unpack. `SHA256SUMS` covers all
-of them.
+licence, so `./run.sh` works straight out of the unpack. The source package is
+`git archive` of the tagged commit, so build it the normal way with `make`, and
+`SHA256SUMS` covers all five tarballs.
 
 All four targets are built on native runners, so nothing is cross-compiled or
 emulated and no emulation shows up in your timings. The macOS tarballs are the

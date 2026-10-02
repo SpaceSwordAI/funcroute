@@ -3,6 +3,7 @@
 #
 #   scripts/package.sh linux-x86_64
 #   scripts/package.sh darwin-arm64
+#   scripts/package.sh source          # full source tree, any platform
 #
 # Expects ./funcroute and ./funcroute-client to have been built already (the
 # Makefile puts FUNCROUTE_VERSION into both). Produces
@@ -24,7 +25,11 @@ fi
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 
-if [ ! -x ./funcroute ] || [ ! -x ./funcroute-client ]; then
+SOURCE_ONLY=0
+[ "$PLATFORM" = "source" ] && SOURCE_ONLY=1
+
+if [ "$SOURCE_ONLY" -eq 0 ] &&
+   { [ ! -x ./funcroute ] || [ ! -x ./funcroute-client ]; }; then
     echo "package.sh: run make first (funcroute / funcroute-client missing)" >&2
     exit 1
 fi
@@ -40,12 +45,43 @@ if [ -z "${VERSION:-}" ]; then
 fi
 VERSION=${VERSION#v}
 
-NAME="funcroute-${VERSION}-${PLATFORM}"
+if [ "$SOURCE_ONLY" -eq 1 ]; then
+    NAME="funcroute-${VERSION}-src"
+else
+    NAME="funcroute-${VERSION}-${PLATFORM}"
+fi
 STAGE="$ROOT/dist/$NAME"
-rm -rf "$STAGE"
-mkdir -p "$STAGE"
 
 echo "packaging $NAME"
+
+# ---- source release: the committed tree, nothing else ----
+if [ "$SOURCE_ONLY" -eq 1 ]; then
+    mkdir -p "$ROOT/dist"
+    # git archive archives exactly what is tracked, which is what keeps secrets,
+    # databases, built binaries and generated fixtures out of the tarball. The
+    # fallback for a non-git checkout names the sources explicitly and excludes
+    # the same things by hand.
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git archive --format=tar --prefix="$NAME/" HEAD \
+            | gzip -9 > "$ROOT/dist/$NAME.tar.gz"
+    else
+        tar czf "$ROOT/dist/$NAME.tar.gz" --transform "s,^\.,$NAME," \
+            --exclude=dist --exclude='*.db*' --exclude='.env' --exclude='*~' \
+            ./src ./test ./scripts ./.github ./Makefile ./README.md ./LICENSE \
+            ./config.json ./client.json ./frontend.html ./run.sh \
+            ./.env.example ./.gitignore
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        ( cd "$ROOT/dist" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
+    elif command -v shasum >/dev/null 2>&1; then
+        ( cd "$ROOT/dist" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
+    fi
+    echo "wrote dist/$NAME.tar.gz (source)"
+    exit 0
+fi
+
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
 
 # ---- macOS: bundle the Homebrew dylibs and repoint every reference ----
 if [ "$(uname -s)" = "Darwin" ]; then

@@ -93,3 +93,68 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
           if-no-files-found: error
+
+  source:
+    name: source tarball
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        run: echo "value=$(git describe --tags --always --dirty | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
+      - name: Package source
+        run: |
+          chmod +x scripts/package.sh run.sh
+          VERSION="${{ steps.version.outputs.value }}" scripts/package.sh source
+          ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: funcroute-source
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  edge:
+    name: edge pre-release
+    needs: [build, source]
+    # Every push to main refreshes a rolling pre-release, so there is always a
+    # downloadable build of the current main without waiting for a tag. Tagged
+    # releases stay the thing to actually trust.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          ls -l
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish or refresh the edge release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          notes="Rolling build of main at $SHA. Prebuilt binaries are convenient, not blessed: use a tagged release for that."
+          if gh release view edge >/dev/null 2>&1; then
+            gh release upload edge dist/* --clobber
+            gh release edit edge --notes "$notes"
+          else
+            gh release create edge --prerelease --target "$SHA" \
+              --title "edge (rolling main)" --notes "$notes" dist/*
+          fi
+          gh release view edge --json url,tagName --jq '.tagName + " " + .url'
