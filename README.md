@@ -243,20 +243,22 @@ already exists and uploads with `--clobber` rather than failing, and it leaves
 whatever notes you wrote alone.) The same workflow can be started from the
 **Actions** tab with *Run workflow*, for a tag that already exists.
 
-| Tarball | Built on | Notes |
+| File | Built on | Notes |
 | --- | --- | --- |
 | `funcroute-<version>-linux-x86_64.tar.gz` | ubuntu-24.04 | links your distro's libcurl, jansson, libmicrohttpd, openssl, sqlite3 |
 | `funcroute-<version>-linux-aarch64.tar.gz` | ubuntu-24.04-arm | same |
 | `funcroute-<version>-darwin-arm64.tar.gz` | macos-15 | self-contained, the Homebrew dylibs ship in `lib/` |
 | `funcroute-<version>-darwin-x86_64.tar.gz` | macos-15-intel | same |
 | `funcroute-<version>-src.tar.gz` | any | the whole source tree: `src/`, `test/`, `scripts/`, Makefile, docs, workflows |
+| `funcroute-<version>-src.zip` | any | the same tree as a zip, for people who would rather have that |
 
-Five packages are published per release: four platform builds and one source
-tarball. Each binary package unpacks into a directory holding `funcroute`,
+Six packages are published per release: four platform builds, and the source
+tree as both `.tar.gz` and `.zip`. Each binary package unpacks into a directory holding `funcroute`,
 `funcroute-client`, `run.sh`, `config.json`, `.env.example`, the README and the
 licence, so `./run.sh` works straight out of the unpack. The source package is
 `git archive` of the tagged commit, so build it the normal way with `make`, and
-`SHA256SUMS` covers all five tarballs.
+The checksums for all six are written into the release body rather than attached
+as a seventh file.
 
 All four targets are built on native runners, so nothing is cross-compiled or
 emulated and no emulation shows up in your timings. The macOS tarballs are the

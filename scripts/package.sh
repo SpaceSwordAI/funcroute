@@ -3,7 +3,7 @@
 #
 #   scripts/package.sh linux-x86_64
 #   scripts/package.sh darwin-arm64
-#   scripts/package.sh source          # full source tree, any platform
+#   scripts/package.sh source          # full source tree, as .tar.gz + .zip
 #
 # Expects ./funcroute and ./funcroute-client to have been built already (the
 # Makefile puts FUNCROUTE_VERSION into both). Produces
@@ -71,12 +71,30 @@ if [ "$SOURCE_ONLY" -eq 1 ]; then
             ./config.json ./client.json ./frontend.html ./run.sh \
             ./.env.example ./.gitignore
     fi
-    if command -v sha256sum >/dev/null 2>&1; then
-        ( cd "$ROOT/dist" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
-    elif command -v shasum >/dev/null 2>&1; then
-        ( cd "$ROOT/dist" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
+    # The same tree as a zip, because release downloads are split between
+    # people who expect .tar.gz and people who expect .zip.
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git archive --format=zip --prefix="$NAME/" HEAD \
+            > "$ROOT/dist/$NAME.zip"
+    elif command -v zip >/dev/null 2>&1; then
+        # zip has no --prefix, so this fallback unpacks at the top level rather
+        # than into a single directory.
+        ( cd "$ROOT" && zip -qr "$ROOT/dist/$NAME.zip" \
+              --exclude='*.db*' --exclude='.env' --exclude='*~' \
+              src test scripts .github Makefile README.md LICENSE config.json \
+              client.json frontend.html run.sh .env.example .gitignore )
+    else
+        echo "package.sh: no git and no zip tool; skipping the zip" >&2
     fi
-    echo "wrote dist/$NAME.tar.gz (source)"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        ( cd "$ROOT/dist" && sha256sum "$NAME.tar.gz" "$NAME.zip" \
+              > "$NAME.sha256" )
+    elif command -v shasum >/dev/null 2>&1; then
+        ( cd "$ROOT/dist" && shasum -a 256 "$NAME.tar.gz" "$NAME.zip" \
+              > "$NAME.sha256" )
+    fi
+    echo "wrote dist/$NAME.tar.gz and dist/$NAME.zip (source)"
     exit 0
 fi
 

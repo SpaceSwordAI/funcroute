@@ -117,7 +117,7 @@ jobs:
           name: funcroute-source
           path: |
             dist/*.tar.gz
-            dist/*.sha256
+            dist/*.zip
           if-no-files-found: error
 
   edge:
@@ -147,7 +147,7 @@ jobs:
         run: |
           cd dist
           ls -l
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: Publish or refresh the edge release
@@ -157,12 +157,21 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -eu
-          notes="Rolling build of main at $SHA. Prebuilt binaries are convenient, not blessed: use a tagged release for that."
+          # The same six assets as a tagged release. The notes are rebuilt on every
+          # run, so the checksums live there instead of being a seventh asset.
+          assets=$(ls dist/*.tar.gz dist/*.zip)
+          {
+            printf 'Rolling build of main at %s. Prebuilt binaries are convenient, not blessed: use a tagged release for that.\n\n' "$SHA"
+            printf '## Checksums\n\n```\n'
+            cat dist/SHA256SUMS
+            printf '```\n'
+          } > /tmp/notes.md
           if gh release view edge >/dev/null 2>&1; then
-            gh release upload edge dist/* --clobber
-            gh release edit edge --notes "$notes"
+            gh release upload edge $assets --clobber
+            gh release edit edge --notes-file /tmp/notes.md
           else
             gh release create edge --prerelease --target "$SHA" \
-              --title "edge (rolling main)" --notes "$notes" dist/*
+              --title "edge (rolling main)" --notes-file /tmp/notes.md $assets
           fi
-          gh release view edge --json url,tagName --jq '.tagName + " " + .url'
+          gh release view edge --json url,tagName,assets \
+            --jq '.tagName + " " + .url + " (" + (.assets|length|tostring) + " assets)"'

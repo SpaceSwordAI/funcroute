@@ -103,7 +103,7 @@ jobs:
         run: |
           cd dist
           ls -l
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       - name: Publish
@@ -112,11 +112,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
+          set -eu
+          # Exactly six assets: four platform builds, and the source tree as both
+          # a tarball and a zip. Checksums go in the release body rather than as a
+          # seventh file.
+          assets=$(ls dist/*.tar.gz dist/*.zip)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+            gh release upload "$TAG" $assets --clobber
           else
-            gh release create "$TAG" --title "$TAG" --generate-notes dist/*
+            gh release create "$TAG" --title "$TAG" --generate-notes $assets
           fi
+          # Add the checksums once, whether the release was created here or already
+          # existed (say, one started from the web UI).
+          if ! gh release view "$TAG" --json body --jq .body | grep -q '^## Checksums'; then
+            gh release view "$TAG" --json body --jq .body > /tmp/body.md
+            { printf '\n## Checksums\n\n```\n'; cat dist/SHA256SUMS; printf '```\n'; } >> /tmp/body.md
+            gh release edit "$TAG" --notes-file /tmp/body.md
+          fi
+          gh release view "$TAG" --json url,tagName,assets \
+            --jq '.tagName + " " + .url + " (" + (.assets|length|tostring) + " assets)"'
 
   source:
     name: source tarball
@@ -141,5 +155,5 @@ jobs:
           name: funcroute-source
           path: |
             dist/*.tar.gz
-            dist/*.sha256
+            dist/*.zip
           if-no-files-found: error
