@@ -234,6 +234,15 @@ hand. Every push to `main` also refreshes a rolling `edge` pre-release with the
 same five packages, which means there is always something downloadable without
 waiting for a tag, and it is clearly marked as the build not to trust.
 
+You never have to build or tag anything locally. The release can be started
+entirely in the browser: **Releases -> Draft a new release -> pick a tag ->
+`v0.6.0` -> create the tag on publish**. That tag push runs the workflow, and a
+couple of minutes later the release you just created has the four binaries, the
+source tarball and `SHA256SUMS` attached. (`release.yml` notices the release
+already exists and uploads with `--clobber` rather than failing, and it leaves
+whatever notes you wrote alone.) The same workflow can be started from the
+**Actions** tab with *Run workflow*, for a tag that already exists.
+
 | Tarball | Built on | Notes |
 | --- | --- | --- |
 | `funcroute-<version>-linux-x86_64.tar.gz` | ubuntu-24.04 | links your distro's libcurl, jansson, libmicrohttpd, openssl, sqlite3 |
