@@ -1,0 +1,7 @@
+{
+  "base_url": "http://127.0.0.1:11434",
+  "endpoint": "/v1/chat/completions",
+  "model": "bhag",
+  "stream": false,
+  "timeout_secs": 120
+}

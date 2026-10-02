@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>funcroute frontend</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.25rem; }
+  label { font-size: .85rem; font-weight: 600; display: block; margin: .75rem 0 .25rem; }
+  textarea, input[type=text] { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; }
+  textarea { min-height: 6rem; }
+  .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; padding: .5rem 1.25rem; cursor: pointer; }
+  pre { background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; padding: .75rem; white-space: pre-wrap; word-break: break-word; min-height: 4rem; }
+  .imgs { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .imgs img { max-height: 5rem; border: 1px solid #ccc; border-radius: 4px; }
+  .imgs .chip { font-size: .8rem; background: #eee; padding: .2rem .5rem; border-radius: 4px; }
+  #status { font-size: .8rem; color: #666; margin-left: .5rem; }
+</style>
+</head>
+<body>
+<h1>funcroute frontend <span id="status"></span></h1>
+<p>OpenAI-compatible chat client that talks to the <code>/v1/chat/completions</code>
+gateway. Requests containing an <code>image_url</code> or <code>file</code> part
+are routed to DeepSeek VL, <code>input_audio</code> parts to the omni model, and
+text-only requests to DeepSeek.</p>
+
+<label for="base">Base URL</label>
+<input type="text" id="base" value="http://127.0.0.1:11434">
+
+<label for="model">Model (the router rewrites this)</label>
+<input type="text" id="model" value="client-model">
+
+<label for="prompt">Prompt</label>
+<textarea id="prompt" placeholder="Ask something..."></textarea>
+
+<label for="file">Attachments — images, audio, PDFs (become inline data URLs, routed to the media provider)</label>
+<input type="file" id="file" accept="image/*,audio/*,.pdf,.txt,.csv,.json,application/pdf,text/*" multiple>
+<div class="imgs" id="imgs"></div>
+
+<div class="row">
+  <label style="margin:0"><input type="checkbox" id="stream"> stream</label>
+  <button id="send">Send</button>
+  <button id="clear">Clear output</button>
+</div>
+
+<pre id="out"></pre>
+
+<script>
+const $ = id => document.getElementById(id);
+let pendingAttachments = []; // {name, kind, dataUrl}
+
+function kindOf(file) {
+  const t = (file.type || '').toLowerCase();
+  if (t.startsWith('image/')) return 'image';
+  if (t.startsWith('audio/')) return 'audio';
+  const n = (file.name || '').toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp)$/.test(n)) return 'image';
+  if (/\.(wav|mp3|m4a|ogg|oga|opus|flac|aac|webm)$/.test(n)) return 'audio';
+  return 'file'; // pdf, txt, csv, json, ...
+}
+
+$('file').addEventListener('change', () => {
+  pendingAttachments = [];
+  $('imgs').innerHTML = '';
+  for (const f of $('file').files) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const kind = kindOf(f);
+      pendingAttachments.push({name: f.name, kind, dataUrl: reader.result});
+      let el;
+      if (kind === 'image') {
+        el = document.createElement('img');
+        el.src = reader.result;
+        el.title = f.name;
+      } else {
+        el = document.createElement('span');
+        el.className = 'chip';
+        el.textContent = kind + ': ' + f.name;
+      }
+      $('imgs').appendChild(el);
+    };
+    reader.readAsDataURL(f);
+  }
+});
+
+$('send').addEventListener('click', async () => {
+  const prompt = $('prompt').value.trim();
+  if (!prompt && pendingAttachments.length === 0) { alert('enter a prompt or attach a file'); return; }
+  const stream = $('stream').checked;
+  const parts = [{ type: 'text', text: prompt }];
+  for (const a of pendingAttachments) {
+    if (a.kind === 'image') {
+      parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+    } else if (a.kind === 'audio') {
+      // OpenAI input_audio wants raw base64 data + a short format token.
+      const comma = a.dataUrl.indexOf(';base64,');
+      const mime = a.dataUrl.slice(5, comma);       // e.g. audio/wav
+      const b64 = a.dataUrl.slice(comma + 8);
+      const fmt = (mime.split('/')[1] || 'wav')
+        .replace('mpeg', 'mp3').replace('mp4', 'm4a');
+      parts.push({ type: 'input_audio', input_audio: { data: b64, format: fmt } });
+    } else {
+      parts.push({ type: 'file', file: { filename: a.name, file_data: a.dataUrl } });
+    }
+  }
+  const messages = [{ role: 'user', content: parts.length > 1 ? parts : prompt }];
+  const body = { model: $('model').value || 'client-model', messages, stream };
+
+  $('status').textContent = '…';
+  const out = $('out');
+  out.textContent = '';
+  try {
+    const res = await fetch($('base').value + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) { out.textContent = 'HTTP ' + res.status + ': ' + await res.text(); $('status').textContent = ''; return; }
+
+    if (stream && res.body) {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (line.startsWith('data:')) {
+            const payload = line.slice(5).trim();
+            if (payload === '[DONE]') continue;
+            try {
+              const d = JSON.parse(payload);
+              const delta = d.choices?.[0]?.delta?.content;
+              if (delta) out.textContent += delta;
+            } catch { /* ignore non-JSON keep-alives */ }
+          }
+        }
+      }
+    } else {
+      const d = await res.json();
+      out.textContent = d.choices?.[0]?.message?.content ?? JSON.stringify(d, null, 2);
+    }
+    $('status').textContent = 'done';
+  } catch (e) {
+    out.textContent = 'error: ' + e.message;
+    $('status').textContent = '';
+  }
+});
+
+$('clear').addEventListener('click', () => { $('out').textContent = ''; $('status').textContent = ''; });
+</script>
+</body>
+</html>

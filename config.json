@@ -1,0 +1,51 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 11434,
+    "max_connections": 128
+  },
+  "database": {
+    "path": "funcroute.db"
+  },
+  "providers": {
+    "deepseek": {
+      "type": "openai",
+      "base_url": "https://api.deepseek.com",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "model": "deepseek-v4-flash",
+      "reasoning": "high",
+      "timeout_secs": 120
+    },
+    "deepseek-vl": {
+      "type": "openai",
+      "base_url": "https://openrouter.ai/api",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "reasoning": "low",
+      "timeout_secs": 180
+    },
+    "qwen-omni": {
+      "type": "openai",
+      "base_url": "https://openrouter.ai/api",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "qwen/qwen3.8-omni-flash",
+      "reasoning": "low",
+      "timeout_secs": 180
+    }
+  },
+  "routing": {
+    "default_provider": "deepseek",
+    "image_provider": "deepseek-vl",
+    "file_provider": "deepseek-vl",
+    "audio_provider": "qwen-omni",
+    "media_provider": "deepseek-vl",
+    "image_content_type": "image_url",
+    "audio_content_type": "input_audio",
+    "file_content_type": "file",
+    "endpoint": "/v1/chat/completions",
+    "ollama_model": "bhag",
+    "max_request_bytes": 131072,
+    "max_messages": 128,
+    "advertised_context_length": 1000000
+  }
+}
