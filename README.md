@@ -1,5 +1,7 @@
 # funcroute
 
+[![build](https://github.com/SpaceSwordAI/funcroute/actions/workflows/build.yml/badge.svg)](https://github.com/SpaceSwordAI/funcroute/actions/workflows/build.yml)
+
 A small C router that gives a text-only model eyes, ears and a filing cabinet.
 
 Point your client at funcroute instead of at a model vendor, and the cheap
@@ -169,7 +171,7 @@ chmod 600 .env
 `run.sh` sources `.env` and execs the binary. You should see this:
 
 ```
-funcroute: listening on 127.0.0.1:11434 (endpoint /v1/chat/completions)
+funcroute 0.5.0: listening on 127.0.0.1:11434 (endpoint /v1/chat/completions)
   text  -> provider "deepseek"    model "deepseek-v4-flash"
   image -> provider "deepseek-vl" model "deepseek/deepseek-v4.1-flash"
   file  -> provider "deepseek-vl" model "deepseek/deepseek-v4.1-flash"
@@ -223,7 +225,55 @@ All external, all via `pkg-config`, nothing hand-rolled:
 
 Builds clean with `-std=c2x -Wall -Wextra -Wpedantic`, no warnings.
 
-## Configuration
+## Releases, packaging and CI
+
+Tagged builds are attached to the releases page, one tarball per platform:
+
+| Tarball | Built on | Notes |
+| --- | --- | --- |
+| `funcroute-<version>-linux-x86_64.tar.gz` | ubuntu-24.04 | links your distro's libcurl, jansson, libmicrohttpd, openssl, sqlite3 |
+| `funcroute-<version>-linux-aarch64.tar.gz` | ubuntu-24.04-arm | same |
+| `funcroute-<version>-darwin-arm64.tar.gz` | macos-15 | self-contained, the Homebrew dylibs ship in `lib/` |
+| `funcroute-<version>-darwin-x86_64.tar.gz` | macos-15-intel | same |
+
+Each tarball unpacks into a single directory holding `funcroute`,
+`funcroute-client`, `run.sh`, `config.json`, `.env.example`, the README and the
+licence, so `./run.sh` works straight out of the unpack. `SHA256SUMS` covers all
+of them.
+
+All four targets are built on native runners, so nothing is cross-compiled or
+emulated and no emulation shows up in your timings. The macOS tarballs are the
+only ones doing real work: `scripts/package.sh` walks `otool -L`, copies every
+non-system dylib into `lib/`, rewrites each reference to `@executable_path/lib/`,
+and then fails the build if anything still points at the Homebrew prefix. The
+Linux binaries are plain dynamic executables, which is why they are a quarter of
+a megabyte instead of 40 MB, and why your distro needs the libraries:
+
+```sh
+apt-get install libcurl4 libjansson4 libmicrohttpd12 libssl3 libsqlite3-0  # Debian/Ubuntu
+dnf install libcurl jansson libmicrohttpd openssl sqlite                   # Fedora
+pacman -S curl jansson libmicrohttpd openssl sqlite                        # Arch
+```
+
+Or the old way, from source:
+
+```sh
+make VERSION=0.5.0
+sudo make install              # /usr/local/bin; override with PREFIX=/usr
+```
+
+The version is compiled into both binaries. It shows up in the startup banner
+and in `GET /api/version`, so you can tell a release build from a `git describe`
+build without guessing. A binary compiled by hand, without `VERSION`, reports
+`dev`.
+
+CI runs on every push and pull request: build, `make test`, package, on all four
+platforms. That test is offline (mock upstreams, no keys, no network) and asserts
+the routed provider and model recorded for each attachment kind, so a routing
+regression fails the build instead of a release. Cutting a release is
+`git tag v0.5.1 && git push origin v0.5.1`; the workflow builds, tests, packages,
+writes checksums and publishes. Re-running it on the same tag replaces the
+assets.
 
 JSON, read from `config.json` unless you pass a path as the first argument or
 set `FUNCROUTE_CONFIG`.
@@ -427,6 +477,9 @@ OPENROUTER_API_KEY=... python3 test/bench/probe_reasoning.py
 
 # end to end through the router: every row of the measured table
 python3 test/bench/e2e_live.py
+
+# offline routing test: mock upstreams, no keys. This is the CI gate.
+make test
 ```
 
 `e2e_live.py` starts the router on a scratch database, sends one request per
@@ -457,8 +510,11 @@ src/client.c        the CLI client                                     (~840 lin
 src/config.c/.h     JSON config, provider resolution, fallbacks        (~360 lines)
 src/provider.c/.h   one upstream request, reasoning field handling     (~175 lines)
 src/logdb.c/.h      optional SQLite request log                        (~285 lines)
+test/routing_test.py    offline routing assertions against mock upstreams
 test/mock_upstream.py   mock OpenAI upstream for routing tests
 test/bench/*.py         the scripts behind the measured numbers
+scripts/package.sh      builds a release tarball for one platform
+.github/workflows/      the 4-platform build matrix and the tag-driven release
 ```
 
 About 4,000 lines of C in total, of which roughly 3,200 is the router and 840 is
@@ -493,9 +549,11 @@ The honest list, in the order you would hit them:
 - **Prefix caching only survives where the prefix survives.** Trimming keeps the
   system prompt byte-identical for exactly that reason, so don't reorder messages
   upstream of the router and expect the cache to follow along.
-- **No unit tests.** Routing logic is covered by the live probes in `test/bench`
-  and the mock upstream in `test/mock_upstream.py`. There is no CI harness
-  asserting HTTP-level behaviour against a fixed expectation.
+- **The test suite is thin.** `make test` runs `test/routing_test.py`, which
+  starts mock upstreams and asserts the routed provider and model recorded for
+  every attachment kind. That runs in CI on all four platforms with no keys. The
+  live probes in `test/bench` are not run in CI, because they need real accounts
+  and cost money; run them yourself if you doubt a number above.
 - **This is capability stitching, not a model merger.** The composite only looks
   like one big multimodal model because the router swaps upstreams per request.
   Please don't cite it in a paper.
@@ -505,7 +563,4 @@ The honest list, in the order you would hit them:
 
 ## License
 
-Not chosen yet, which means for the moment you have no rights to it beyond
-reading it. That is a bug, and it is the next thing to fix before this gets
-forked. MIT if you just want to use it; Apache-2.0 if you also want a patent
-grant.
+MIT. See [LICENSE](LICENSE). Use it, fork it, ship it.

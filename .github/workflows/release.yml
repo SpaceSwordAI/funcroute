@@ -1,0 +1,109 @@
+name: release
+
+# Tag a release and push it:
+#
+#   git tag v0.6.0 && git push origin v0.6.0
+#
+# Builds the same four native targets as the build workflow, runs the offline
+# routing test on each, packages a tarball per platform, and attaches them plus
+# a checksums file to a GitHub release named after the tag. The tag (minus any
+# leading "v") is compiled into the binaries and reported by GET /api/version.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  PKG_CONFIG_PATH: >-
+    /opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/sqlite/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig:/usr/local/opt/curl/lib/pkgconfig:/usr/local/opt/sqlite/lib/pkgconfig
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - runner: macos-15-intel
+            platform: darwin-x86_64
+          - runner: macos-15
+            platform: darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcurl4-openssl-dev libjansson-dev \
+            libmicrohttpd-dev libssl-dev libsqlite3-dev
+
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config curl jansson libmicrohttpd openssl@3 sqlite
+
+      - name: Build
+        env:
+          VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+        run: make VERSION="${VERSION#v}"
+
+      - name: Test
+        run: make test
+
+      - name: Package
+        env:
+          VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+        run: scripts/package.sh "${{ matrix.platform }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: funcroute-${{ matrix.platform }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          ls -l
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes dist/*
+          fi

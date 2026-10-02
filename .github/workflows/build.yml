@@ -1,0 +1,95 @@
+name: build
+
+# Builds and tests on every platform the releases target. All four runners are
+# native, so there is no cross-compiling and no emulation: the binary you get
+# is what that architecture links and runs by itself.
+#
+# Runner notes:
+#   ubuntu-24.04-arm  is free for public repositories (paid on private ones).
+#                     If this project ever goes private, either drop that entry
+#                     or build it under emulation instead.
+#   macos-15-intel    is the Intel macOS image. macos-13 is retired.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # openssl@3, curl and sqlite are keg-only in Homebrew, so their .pc files are
+  # not on the default pkg-config path. Both prefixes are listed: Apple Silicon
+  # runners use /opt/homebrew and Intel runners use /usr/local.
+  PKG_CONFIG_PATH: >-
+    /opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/curl/lib/pkgconfig:/opt/homebrew/opt/sqlite/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig:/usr/local/opt/curl/lib/pkgconfig:/usr/local/opt/sqlite/lib/pkgconfig
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - runner: macos-15-intel
+            platform: darwin-x86_64
+          - runner: macos-15
+            platform: darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcurl4-openssl-dev libjansson-dev \
+            libmicrohttpd-dev libssl-dev libsqlite3-dev
+
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config curl jansson libmicrohttpd openssl@3 sqlite
+
+      - name: Version
+        id: version
+        run: echo "value=$(git describe --tags --always --dirty | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
+      - name: Syntax checks
+        run: |
+          sh -n run.sh
+          sh -n scripts/package.sh
+          python3 -m py_compile test/*.py test/bench/*.py
+
+      - name: Build
+        run: make VERSION="${{ steps.version.outputs.value }}"
+
+      - name: Test
+        # Offline: mock upstreams, no API keys, asserts the routing decision
+        # recorded for every attachment kind.
+        run: make test
+
+      - name: Package
+        run: scripts/package.sh "${{ matrix.platform }}"
+
+      - name: Show what was built
+        run: |
+          ls -l dist/
+          tar tzf dist/*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: funcroute-${{ matrix.platform }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error

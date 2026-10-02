@@ -956,8 +956,8 @@ int main(int argc, char **argv)
     const Provider *img = config_find(&cfg, cfg.routing.image_provider);
     const Provider *file = config_find(&cfg, cfg.routing.file_provider);
     const Provider *audio = config_find(&cfg, cfg.routing.audio_provider);
-    printf("funcroute: listening on %s:%u (endpoint %s)\n", cfg.server.host,
-           (unsigned)cfg.server.port, cfg.routing.endpoint);
+    printf("funcroute %s: listening on %s:%u (endpoint %s)\n", FUNCROUTE_VERSION,
+           cfg.server.host, (unsigned)cfg.server.port, cfg.routing.endpoint);
     printf("  text  -> provider \"%s\" model \"%s\"\n", dflt->name, dflt->model);
     printf("  image -> provider \"%s\" model \"%s\"\n", img->name, img->model);
     printf("  file  -> provider \"%s\" model \"%s\"\n", file->name, file->model);

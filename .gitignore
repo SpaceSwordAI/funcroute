@@ -20,3 +20,6 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+
+# Release tarballs (built by scripts/package.sh)
+dist/

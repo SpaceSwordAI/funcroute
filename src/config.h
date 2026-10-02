@@ -8,6 +8,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+// Version stamped in by the build (`make VERSION=1.2.3`), reported by
+// GET /api/version and printed in the startup banner. A hand-compiled binary
+// that skips the Makefile reports "dev" rather than claiming a release number.
+#ifndef FUNCROUTE_VERSION
+#define FUNCROUTE_VERSION "dev"
+#endif
+
 // Default context window advertised to harnesses (/v1/models, /api/tags,
 // /api/show) when routing.advertised_context_length is not set. Text requests
 // route to DeepSeek, whose real context is 128K tokens; harnesses display

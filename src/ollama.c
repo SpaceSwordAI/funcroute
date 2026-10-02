@@ -1292,7 +1292,10 @@ bool ollama_handle_request(struct MHD_Connection *conn, const Config *cfg,
     enum MHD_Result rc = MHD_NO;
 
     if (strcmp(method, "GET") == 0 && strcmp(url, "/api/version") == 0) {
-        rc = respond_ollama(conn, MHD_HTTP_OK, "{\"version\":\"0.5.0\"}");
+        char version_json[64];
+        snprintf(version_json, sizeof version_json,
+                 "{\"version\":\"%s\"}", FUNCROUTE_VERSION);
+        rc = respond_ollama(conn, MHD_HTTP_OK, version_json);
     } else if (strcmp(method, "GET") == 0 && strcmp(url, "/api/tags") == 0) {
         char *tags = build_tags(cfg);
         if (tags != nullptr) {
