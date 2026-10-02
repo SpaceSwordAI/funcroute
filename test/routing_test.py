@@ -48,21 +48,35 @@ def start(cmd, cwd, log_path, env=None):
                             env=env), log_path
 
 
-def wait_for_port(port, host="127.0.0.1", seconds=30):
-    """True once something is listening and accepting TCP connections.
+def http_ready(port, seconds=40):
+    """Poll a mock with a real chat request, exactly the way the router will.
 
-    A fixed sleep is not enough on a busy runner: if the mocks have not finished
-    starting, the first requests get a 502 from the router (which is honest - the
-    upstream really was unreachable) and the test fails for the wrong reason.
+    Returns (ok, detail). A bare TCP connect only proves something is bound;
+    this proves the mock is serving, and the reply doubles as a check that the
+    thing on the port is really our mock. A fixed sleep is not enough on a busy
+    runner, and a timeout here is a mock problem, not a routing problem.
     """
+    url = f"http://127.0.0.1:{port}/v1/chat/completions"
+    payload = json.dumps({"model": "ready",
+                          "messages": [{"role": "user", "content": "ping"}]}).encode()
     deadline = time.time() + seconds
+    detail = "never attempted"
     while time.time() < deadline:
         try:
-            with socket.create_connection((host, port), timeout=1):
-                return True
-        except OSError:
-            time.sleep(0.2)
-    return False
+            req = urllib.request.Request(url, data=payload,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                status = resp.status
+                body = resp.read().decode("utf-8", "replace")
+            if status == 200:
+                return True, body
+            detail = f"HTTP {status}"
+        except urllib.error.HTTPError as exc:
+            detail = f"HTTP {exc.code}"
+        except Exception as exc:  # noqa: BLE001 - report whatever went wrong
+            detail = f"{type(exc).__name__}: {exc}"
+        time.sleep(0.25)
+    return False, detail
 
 
 def wait_for(path, needle, seconds=20):
@@ -79,6 +93,8 @@ def wait_for(path, needle, seconds=20):
 
 
 def stop(proc):
+    if proc is None:          # the router may never have started
+        return
     if proc.poll() is None:
         proc.send_signal(signal.SIGTERM)
         try:
@@ -138,12 +154,17 @@ def main():
             log = os.path.join(workdir, f"mock-{mock_name}.log")
             mocks.append(start([PYTHON, "test/mock_upstream.py", port, mock_name],
                                ROOT, log))
-        for port in ("9101", "9102"):
-            if not wait_for_port(int(port)):
-                proc, log = mocks[0 if port == "9101" else 1]
-                raise Fail(f"mock upstream on port {port} never accepted a connection"
-                           + (" (process exited)" if proc.poll() is not None else "")
-                           + ":\n" + open(log).read())
+        for idx, port in enumerate(("9101", "9102")):
+            proc, log = mocks[idx]
+            ok, detail = http_ready(int(port))
+            if not ok:
+                raise Fail(
+                    f"mock upstream on port {port} never answered ({detail}); "
+                    f"process status={proc.poll()} "
+                    f"({'exited' if proc.poll() is not None else 'still running'}), "
+                    f"log follows:\n{open(log).read()}")
+            if "handled by" not in detail:
+                raise Fail(f"port {port} answered, but not like our mock: {detail[:120]}")
 
         router, _ = start([os.path.abspath("./funcroute"), "test/config.test.json",
                            "--log", db], ROOT, router_log)

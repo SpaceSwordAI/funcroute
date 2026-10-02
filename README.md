@@ -270,10 +270,19 @@ build without guessing. A binary compiled by hand, without `VERSION`, reports
 CI runs on every push and pull request: build, `make test`, package, on all four
 platforms. That test is offline (mock upstreams, no keys, no network) and asserts
 the routed provider and model recorded for each attachment kind, so a routing
-regression fails the build instead of a release. Cutting a release is
-`git tag v0.5.1 && git push origin v0.5.1`; the workflow builds, tests, packages,
-writes checksums and publishes. Re-running it on the same tag replaces the
-assets.
+regression fails the build instead of a release.
+
+Cutting a release is one command, which builds, tests, tags, pushes, and then
+watches the workflow publish the result:
+
+```sh
+scripts/release.sh 0.6.0            # or: patch / minor / major
+scripts/release.sh patch --dry-run  # show the plan, change nothing
+```
+
+Underneath, that is just `git tag v0.6.0 && git push origin v0.6.0`, so pushing a
+tag by hand works the same. It refuses to tag a dirty tree or a tag that already
+exists, and re-running the workflow on an existing tag replaces the assets.
 
 JSON, read from `config.json` unless you pass a path as the first argument or
 set `FUNCROUTE_CONFIG`.
@@ -408,6 +417,35 @@ request_size, response_size, status, duration_ms, trimmed_bytes, error,
 request_body, response_body`. An older database gets migrated in place with
 `ALTER TABLE ADD COLUMN`, so you don't lose it. Request and response bodies are
 stored in full by default, which is worth knowing before you log audio.
+
+## What happens when a key is missing
+
+Keys are checked per route at startup, because in practice a key *is* a
+capability and not a config field. With only a DeepSeek key you get text, and the
+attachment routes announce that they are closed instead of failing somewhere
+upstream:
+
+```
+  text  -> provider "deepseek" model "deepseek-v4-flash"
+  image -> disabled: provider "deepseek-vl" has no API key (set OPENROUTER_API_KEY)
+  file  -> disabled: provider "deepseek-vl" has no API key (set OPENROUTER_API_KEY)
+  audio -> disabled: provider "qwen-omni" has no API key (set OPENROUTER_API_KEY)
+```
+
+A request for a closed route gets `503` naming the variable to set, and the
+request log records `routing provider has no API key`, so you find out from the
+log and not only from a client error. Requests the open route can serve are
+unaffected.
+
+The text route is the exception. Without it there is nothing to fall back to, so
+the process refuses to start rather than serving an endpoint that answers 502 to
+everything:
+
+```
+funcroute: config error: provider "deepseek" (the text route) has no API key;
+set DEEPSEEK_API_KEY. Text is the one route this router cannot do without, so it
+will not start.
+```
 
 ## The Ollama API
 

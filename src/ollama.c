@@ -559,8 +559,12 @@ static char *convert_request(const Config *cfg, const json_t *in, bool stream,
     const Provider *prov = config_find(
         cfg, has_image ? cfg->routing.image_provider
                        : cfg->routing.default_provider);
-    if (prov == nullptr) {
-        set_err(errbuf, "routing provider not configured");
+    if (prov == nullptr || !prov->available) {
+        const char *route = has_image ? cfg->routing.image_provider
+                                      : cfg->routing.default_provider;
+        const bool named = prov != nullptr && prov->api_key_env[0] != '\0';
+        set_err(errbuf, "routing provider \"%s\" has no API key%s%s", route,
+                named ? "; set " : "", named ? prov->api_key_env : "");
         json_decref(messages);
         return nullptr;
     }

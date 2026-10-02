@@ -736,14 +736,21 @@ static enum MHD_Result handle_request(void *cls, struct MHD_Connection *conn,
 
         const char *provider_name = pick_provider(cfg, mk);
         const Provider *prov = config_find(cfg, provider_name);
-        if (prov == nullptr) {
+        if (prov == nullptr || !prov->available) {
+            // The route is configured but its key is not set. Answer 503 and
+            // name the variable, rather than sending the attachment to a model
+            // that was never going to accept it.
+            char msg[CFG_ERRBUF_SIZE];
+            const bool named = prov != nullptr && prov->api_key_env[0] != '\0';
+            snprintf(msg, sizeof msg, "routing provider \"%s\" has no API key%s%s",
+                     provider_name, named ? "; set " : "",
+                     named ? prov->api_key_env : "");
             json_decref(root);
-            rl.status = MHD_HTTP_INTERNAL_SERVER_ERROR;
+            rl.status = MHD_HTTP_SERVICE_UNAVAILABLE;
             rl.duration_ms = wall_ms() - t0;
-            rl.error = "routing provider not configured";
+            rl.error = "routing provider has no API key";
             logdb_record(&rl);
-            return respond_error(conn, MHD_HTTP_INTERNAL_SERVER_ERROR,
-                                 "routing provider not configured");
+            return respond_error(conn, MHD_HTTP_SERVICE_UNAVAILABLE, msg);
         }
         snprintf(rl.routed_provider, sizeof rl.routed_provider, "%s", prov->name);
         snprintf(rl.routed_model, sizeof rl.routed_model, "%s", prov->model);
@@ -952,16 +959,31 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    const Provider *dflt = config_find(&cfg, cfg.routing.default_provider);
-    const Provider *img = config_find(&cfg, cfg.routing.image_provider);
-    const Provider *file = config_find(&cfg, cfg.routing.file_provider);
-    const Provider *audio = config_find(&cfg, cfg.routing.audio_provider);
     printf("funcroute %s: listening on %s:%u (endpoint %s)\n", FUNCROUTE_VERSION,
            cfg.server.host, (unsigned)cfg.server.port, cfg.routing.endpoint);
-    printf("  text  -> provider \"%s\" model \"%s\"\n", dflt->name, dflt->model);
-    printf("  image -> provider \"%s\" model \"%s\"\n", img->name, img->model);
-    printf("  file  -> provider \"%s\" model \"%s\"\n", file->name, file->model);
-    printf("  audio -> provider \"%s\" model \"%s\"\n", audio->name, audio->model);
+    const struct { const char *label; const char *name; } routes[] = {
+        {"text", cfg.routing.default_provider},
+        {"image", cfg.routing.image_provider},
+        {"file", cfg.routing.file_provider},
+        {"audio", cfg.routing.audio_provider},
+    };
+    for (size_t i = 0; i < sizeof routes / sizeof routes[0]; i++) {
+        const Provider *p = config_find(&cfg, routes[i].name);
+        if (p == nullptr || !p->available) {
+            // Not offered, and it says which key would turn it on. The text
+            // route cannot reach here: config_load refuses to start without it.
+            if (p != nullptr && p->api_key_env[0] != '\0')
+                printf("  %-5s -> disabled: provider \"%s\" has no API key"
+                       " (set %s)\n", routes[i].label, routes[i].name,
+                       p->api_key_env);
+            else
+                printf("  %-5s -> disabled: provider \"%s\" has no API key\n",
+                       routes[i].label, routes[i].name);
+        } else {
+            printf("  %-5s -> provider \"%s\" model \"%s\"\n", routes[i].label,
+                   p->name, p->model);
+        }
+    }
     printf("  attachment part types: image \"%s\", audio \"%s\", file \"%s\"\n",
            cfg.routing.image_content_type, cfg.routing.audio_content_type,
            cfg.routing.file_content_type);

@@ -143,13 +143,11 @@ bool config_load(Config *cfg, const char *path, char errbuf[CFG_ERRBUF_SIZE])
             if (env != nullptr)
                 snprintf(p->api_key, sizeof p->api_key, "%s", env);
         }
-        if (p->api_key[0] == '\0') {
-            set_err(errbuf,
-                    "provider \"%s\": no api_key and env \"%s\" is unset",
-                    pname, envname);
-            json_decref(root);
-            return false;
-        }
+        // A missing key is not fatal here. Which keys exist decides which
+        // capabilities this instance can offer, and that is settled below, once
+        // the routing block has named the providers each route needs.
+        snprintf(p->api_key_env, sizeof p->api_key_env, "%s", envname);
+        p->available = p->api_key[0] != '\0';
 
         read_long(pobj, "timeout_secs", 120, &p->timeout_secs);
         if (p->timeout_secs <= 0)
@@ -248,6 +246,23 @@ bool config_load(Config *cfg, const char *path, char errbuf[CFG_ERRBUF_SIZE])
                           sizeof cfg->routing.audio_provider,
                           cfg->routing.media_provider, "audio_provider", errbuf))
         return false;
+
+    // Which capabilities are actually open, given the keys that exist. The text
+    // route must be open: without it every request fails upstream, so it is
+    // better to refuse to start than to serve a broken endpoint.
+    const Provider *text = config_find(cfg, cfg->routing.default_provider);
+    if (text == nullptr || !text->available) {
+        const bool named = text != nullptr && text->api_key_env[0] != '\0';
+        set_err(errbuf,
+                "provider \"%s\" (the text route) has no API key%s%s. Text is"
+                " the one route this router cannot do without, so it will not"
+                " start.",
+                cfg->routing.default_provider, named ? "; set " : "",
+                named ? text->api_key_env : "");
+        json_decref(root);
+        return false;
+    }
+
     if (cfg->routing.endpoint[0] != '/') {
         set_err(errbuf, "routing.endpoint must start with '/'");
         return false;
@@ -264,4 +279,11 @@ const Provider *config_find(const Config *cfg, const char *name)
             return &cfg->providers[i];
     }
     return nullptr;
+}
+
+// A route is usable when its provider exists and resolved an API key.
+bool config_route_usable(const Config *cfg, const char *name)
+{
+    const Provider *p = config_find(cfg, name);
+    return p != nullptr && p->available;
 }

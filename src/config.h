@@ -42,6 +42,8 @@ typedef struct {
     char model[CFG_STR_MODEL]; // model forced onto routed requests
     char reasoning[16];        // optional "low"|"medium"|"high" -> reasoning_effort
     long timeout_secs;         // libcurl timeout
+    char api_key_env[CFG_STR_NAME]; // env var named by "api_key_env" ("" if none)
+    bool available;            // false = no API key resolved, route unusable
 } Provider;
 
 typedef struct {
@@ -102,3 +104,10 @@ set_err(char errbuf[CFG_ERRBUF_SIZE], const char *fmt, ...)
 
 // Find a provider by name; nullptr if absent.
 [[nodiscard]] const Provider *config_find(const Config *cfg, const char *name);
+
+// True when a route's provider exists and has a usable API key. Keys are checked
+// per route rather than all-or-nothing: a deployment with only a text model's
+// key still serves text, and the attachment routes it cannot afford are reported
+// as unavailable instead of being silently misrouted. config_load refuses to
+// start without the text route, because that one is the point of the process.
+[[nodiscard]] bool config_route_usable(const Config *cfg, const char *name);
